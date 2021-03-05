@@ -1,29 +1,29 @@
-$(function() {
+$(function () {
     function SystemViewModel(parameters) {
         var self = this;
 
         self.loginState = parameters[0];
+        self.access = parameters[1];
 
         self.lastCommandResponse = undefined;
         self.systemActions = ko.observableArray([]);
 
-        self.requestData = function() {
+        self.requestData = function () {
             self.requestCommandData();
         };
 
-        self.requestCommandData = function() {
-            if (!self.loginState.isAdmin()) {
+        self.requestCommandData = function () {
+            if (!self.loginState.hasPermission(self.access.permissions.SYSTEM)) {
                 return $.Deferred().reject().promise();
             }
 
-            return OctoPrint.system.getCommands()
-                .done(self.fromCommandResponse);
+            return OctoPrint.system.getCommands().done(self.fromCommandResponse);
         };
 
-        self.fromCommandResponse = function(response) {
+        self.fromCommandResponse = function (response) {
             var actions = [];
             if (response.core && response.core.length) {
-                _.each(response.core, function(data) {
+                _.each(response.core, function (data) {
                     var action = _.extend({}, data);
                     action.actionSource = "core";
                     actions.push(action);
@@ -32,7 +32,7 @@ $(function() {
                     actions.push({action: "divider"});
                 }
             }
-            _.each(response.custom, function(data) {
+            _.each(response.custom, function (data) {
                 var action = _.extend({}, data);
                 action.actionSource = "custom";
                 actions.push(action);
@@ -41,20 +41,58 @@ $(function() {
             self.systemActions(actions);
         };
 
-        self.triggerCommand = function(commandSpec) {
+        self.triggerCommand = function (commandSpec) {
+            if (!self.loginState.hasPermission(self.access.permissions.SYSTEM)) {
+                return $.Deferred().reject().promise();
+            }
+
             var deferred = $.Deferred();
 
-            var callback = function() {
-                OctoPrint.system.executeCommand(commandSpec.actionSource, commandSpec.action)
-                    .done(function() {
-                        new PNotify({title: "Success", text: _.sprintf(gettext("The command \"%(command)s\" executed successfully"), {command: commandSpec.name}), type: "success"});
+            var callback = function () {
+                OctoPrint.system
+                    .executeCommand(commandSpec.actionSource, commandSpec.action)
+                    .done(function () {
+                        var text;
+                        if (commandSpec.async) {
+                            text = gettext(
+                                'The command "%(command)s" was triggered asynchronously'
+                            );
+                        } else {
+                            text = gettext(
+                                'The command "%(command)s" executed successfully'
+                            );
+                        }
+
+                        new PNotify({
+                            title: "Success",
+                            text: _.sprintf(text, {command: _.escape(commandSpec.name)}),
+                            type: "success"
+                        });
                         deferred.resolve(["success", arguments]);
                     })
-                    .fail(function(jqXHR, textStatus, errorThrown) {
-                        if (!commandSpec.hasOwnProperty("ignore") || !commandSpec.ignore) {
-                            var error = "<p>" + _.sprintf(gettext("The command \"%(command)s\" could not be executed."), {command: commandSpec.name}) + "</p>";
-                            error += pnotifyAdditionalInfo("<pre>" + jqXHR.responseText + "</pre>");
-                            new PNotify({title: gettext("Error"), text: error, type: "error", hide: false});
+                    .fail(function (jqXHR, textStatus, errorThrown) {
+                        if (
+                            !commandSpec.hasOwnProperty("ignore") ||
+                            !commandSpec.ignore
+                        ) {
+                            var error =
+                                "<p>" +
+                                _.sprintf(
+                                    gettext(
+                                        'The command "%(command)s" could not be executed.'
+                                    ),
+                                    {command: _.escape(commandSpec.name)}
+                                ) +
+                                "</p>";
+                            error += pnotifyAdditionalInfo(
+                                "<pre>" + _.escape(jqXHR.responseText) + "</pre>"
+                            );
+                            new PNotify({
+                                title: gettext("Error"),
+                                text: error,
+                                type: "error",
+                                hide: false
+                            });
                             deferred.reject(["error", arguments]);
                         } else {
                             deferred.resolve(["ignored", arguments]);
@@ -65,10 +103,10 @@ $(function() {
             if (commandSpec.confirm) {
                 showConfirmationDialog({
                     message: commandSpec.confirm,
-                    onproceed: function() {
+                    onproceed: function () {
                         callback();
                     },
-                    oncancel: function() {
+                    oncancel: function () {
                         deferred.reject("cancelled", arguments);
                     }
                 });
@@ -79,30 +117,26 @@ $(function() {
             return deferred.promise();
         };
 
-        self.onUserLoggedIn = function(user) {
-            if (user.admin) {
+        self.onUserPermissionsChanged = self.onUserLoggedIn = self.onUserLoggedOut = function (
+            user
+        ) {
+            if (self.loginState.hasPermission(self.access.permissions.SYSTEM)) {
                 self.requestData();
             } else {
-                self.onUserLoggedOut();
+                self.lastCommandResponse = undefined;
+                self.systemActions([]);
             }
         };
 
-        self.onUserLoggedOut = function() {
-            self.lastCommandResponse = undefined;
-            self.systemActions([]);
-        };
-
-        self.onEventSettingsUpdated = function() {
-            if (self.loginState.isAdmin()) {
+        self.onEventSettingsUpdated = function () {
+            if (self.loginState.hasPermission(self.access.permissions.SYSTEM)) {
                 self.requestData();
             }
         };
     }
 
-    // view model class, parameters for constructor, container to bind to
-    ADDITIONAL_VIEWMODELS.push([
-        SystemViewModel,
-        ["loginStateViewModel"],
-        []
-    ]);
+    OCTOPRINT_VIEWMODELS.push({
+        construct: SystemViewModel,
+        dependencies: ["loginStateViewModel", "accessViewModel"]
+    });
 });

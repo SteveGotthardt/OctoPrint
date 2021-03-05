@@ -16,6 +16,8 @@ Get connection settings
    Retrieve the current connection settings, including information regarding the available baudrates and
    serial ports and the current connection state.
 
+   Requires the ``STATUS`` permission.
+
    **Example**
 
    .. sourcecode:: http
@@ -39,7 +41,7 @@ Get connection settings
         "options": {
           "ports": ["/dev/ttyACM0", "VIRTUAL"],
           "baudrates": [250000, 230400, 115200, 57600, 38400, 19200, 9600],
-          "printerProfiles": [{"name": "Default", id: "_default"}],
+          "printerProfiles": [{"name": "Default", "id": "_default"}],
           "portPreference": "/dev/ttyACM0",
           "baudratePreference": 250000,
           "printerProfilePreference": "_default",
@@ -59,7 +61,7 @@ Issue a connection command
    Issue a connection command. Currently available command are:
 
    connect
-     Instructs OctoPrint to connect to the printer. Additional parameters are:
+     Instructs OctoPrint to connect or, if already connected, reconnect to the printer. Additional parameters are:
 
      * ``port``: Optional, specific port to connect to. If not set the current ``portPreference`` will be used, or if
        no preference is available auto detection will be attempted.
@@ -81,7 +83,7 @@ Issue a connection command
      for the lost acknowledgment should always be properly investigated and removed instead of depending on this
      "symptom solver".
 
-   Requires user rights.
+   Requires the ``CONNECTION`` permission.
 
    **Example Connect Request**
 

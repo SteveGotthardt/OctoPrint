@@ -14,12 +14,12 @@
 
    The client library instance's options. The following keys are currently supported:
 
-   ``apikey``
-       The API Key to use for requests against the OctoPrint API. Should usually be
-       the anonymous UI API Key provided on the socket.
-
    ``baseurl``
        The base URL of the OctoPrint API
+
+   ``apikey``
+       The API Key to use for requests against the OctoPrint API. If left unset, you'll
+       need to authenticate your session through a login.
 
    ``locale``
        The locale to set in ``X-Locale`` headers on API requests. Useful for API
@@ -119,7 +119,7 @@
    :param string method: The HTTP method to use for the request (optional)
    :param string url: The URL to perform the request against (optional)
    :param object data: The data to send in the request body (optional)
-   :param object opts: Additonal options to use for the request (optional)
+   :param object opts: Additional options to use for the request (optional)
    :returns Promise: A `jQuery Promise <http://api.jquery.com/Types/#Promise>`_ for the request's response
 
 .. js:function:: OctoPrintClient.get(url, opts)
@@ -417,7 +417,7 @@
 
    Creates a custom exception class. ``name`` may be either a function in which case it will be used
    as constructor for the new exception class, or a string, in which case a constructor with proper
-   ``name``, ``message`` and ``stack`` attributes will be created. The class hierarchy will be propery
+   ``name``, ``message`` and ``stack`` attributes will be created. The class hierarchy will be properly
    setup to subclass ``Error``.
 
    **Example:**

@@ -6,15 +6,6 @@ Events
 
 .. contents::
 
-
-.. note::
-
-   With release of OctoPrint 1.1.0, the payload data has been harmonized, it is now a key-value-map for all events.
-   Additionally, the format of the placeholders in both system command and gcode command triggers has been changed to
-   accommodate for this new format. Last but not least, the way of specifying event hooks has changed, OctoPrint no longer
-   separates hooks into two sections (gcodeCommandTrigger and systemCommandTrigger) but instead event hooks are now typed
-   to indicate what to do with the command contained.
-
 .. _sec-events-configuration:
 
 Configuration
@@ -47,6 +38,13 @@ Example
      - event: PrintDone
        command: python ~/growl.py -t mygrowlserver -d "Completed {file}" -a OctoPrint -i http://raspi/Octoprint_logo.png
        type: system
+     - event:
+       - PrintStarted
+       - PrintFailed
+       - PrintDone
+       - PrintCancelled
+       command: python ~/growl.py -t mygrowlserver -d "Event {__eventname} ({name})" -a OctoPrint -i http://raspi/Octoprint_logo.png
+       type: system
      - event: Connected
        command:
        - M115
@@ -62,6 +60,7 @@ Placeholders
 You can use the following generic placeholders in your event hooks:
 
   * ``{__currentZ}``: the current Z position of the head if known, -1 if not available
+  * ``{__eventname}`` : the name of the event hook being triggered
   * ``{__filename}`` : name of currently selected file, or ``NO FILE`` if no file is selected
   * ``{__filepath}`` : path in origin location of currently selected file, or ``NO FILE`` if no file is selected
   * ``{__fileorigin}`` : origin of currently selected file, or ``NO FILE`` if no file is selected
@@ -85,6 +84,12 @@ and its origin via the placeholder ``{origin}``.
 Available Events
 ================
 
+.. note::
+
+   Plugins may add additional events via the :ref:`octoprint.events.register_custom_events hook <sec-plugins-hook-events-register_custom_events>`.
+
+.. _sec-events-available_events-server:
+
 Server
 ------
 
@@ -95,26 +100,73 @@ Shutdown
    The server is shutting down.
 
 ClientOpened
-   A client has connected to the web server.
+   A client has connected to the push socket.
 
    Payload:
 
-     * ``remoteAddress``: the remote address (IP) of the client that connected
+     * ``remoteAddress``: the remote address (IP) of the client that connected. On the push socket only available with
+       a valid login session.
 
    **Note:** Name changed in version 1.1.0
 
-ClientClosed
-   A client has disconnected from the webserver
+   .. versionchanged:: 1.1.0
+   .. versionchanged:: 1.4.0
+
+ClientAuthed
+   A client has authenticated a user session on the push socket.
 
    Payload:
 
-     * ``remoteAddress``: the remote address (IP) of the client that disconnected
+     * ``remoteAddress``: the remote address (IP) of the client that authed. On the push socket only available with a
+       valid login session.
+     * ``username``: the name of the user who authed. On the push socket only available with a valid login session.
+
+  .. versionadded:: 1.4.0
+
+ClientClosed
+   A client has disconnected from the push socket.
+
+   Payload:
+
+     * ``remoteAddress``: the remote address (IP) of the client that disconnected. On the push socket only available
+       with a valid login session.
+
+UserLoggedIn
+   A user logged in. On the push socket only available with a valid login session with admin rights.
+
+   Payload:
+
+     * ``username``: the name of the user who logged in
+
+  .. versionadded:: 1.4.0
+
+UserLoggedOut
+   A user logged out. On the push socket only available with a valid login session with admin rights.
+
+   Payload:
+     * ``username``: the name of the user who logged out
+
+  .. versionadded:: 1.4.0
+
+ConnectivityChanged
+   The server's internet connectivity changed
+
+   Payload:
+
+     * ``old``: Old connectivity value (true for online, false for offline)
+     * ``new``: New connectivity value (true for online, false for offline)
+
+  .. versionadded:: 1.3.5
+
+.. _sec-events-available_events-printer_commmunication:
 
 Printer communication
 ---------------------
 
 Connecting
    The server is attempting to connect to the printer.
+
+  .. versionadded:: 1.3.0
 
 Connected
    The server has connected to the printer.
@@ -129,11 +181,17 @@ Disconnecting
    event might not always be sent when the server and printer get disconnected
    from each other. Do not depend on this for critical life cycle management.
 
+  .. versionadded:: 1.3.0
+
 Disconnected
    The server has disconnected from the printer
 
 Error
-   An error has occurred in the printer communication.
+   An unrecoverable error has been encountered, either as reported by the firmware (e.g. a thermal runaway) or
+   on the connection.
+
+   Note that this event will not fire for error messages from the firmware that are handled (and as such recovered from)
+   either by OctoPrint or a plugin.
 
    Payload:
 
@@ -148,22 +206,29 @@ PrinterStateChanged
        :func:`~octoprint.printer.PrinterInterface.get_state_id` for possible values.
      * ``state_string``: Text representation of the new state.
 
+  .. versionadded:: 1.3.0
+
+.. _sec-events-available_events-file_handling:
+
 File handling
 -------------
 
 Upload
-   A file has been uploaded through the web interface.
+   A file has been uploaded through the :ref:`REST API <sec-api-fileops-uploadfile>`.
 
    Payload:
      * ``name``: the file's name
      * ``path``: the file's path within its storage location
      * ``target``: the target storage location to which the file was uploaded, either ``local`` or ``sdcard``
+     * ``select``: whether the file will immediately be selected, as requested on the API by the corresponding parameter
+     * ``print``: whether the file will immediately start printing, as requested on the API by the corresponding parameter
+     * ``userdata``: optional ``userdata`` if provided on the API, will only be present if supplied in the upload request
 
    .. deprecated:: 1.3.0
 
-        * ``file``: the file's path within its storage location
+        * ``file``: the file's path within its storage location. To be removed in 1.4.0.
 
-      Still available for reasons of backwards compatibility. Will be removed with 1.4.0.
+  .. versionchanged:: 1.4.0
 
 FileAdded
    A file has been added to a storage.
@@ -180,6 +245,8 @@ FileAdded
       A copied file triggers this for its new path. A moved file first triggers ``FileRemoved`` for its original
       path and then ``FileAdded`` for the new one.
 
+  .. versionadded:: 1.3.3
+
 FileRemoved
    A file has been removed from a storage.
 
@@ -194,30 +261,36 @@ FileRemoved
 
       A moved file first triggers ``FileRemoved`` for its original path and then ``FileAdded`` for the new one.
 
+  .. versionadded:: 1.3.3
+
 FolderAdded
    A folder has been added to a storage.
 
    Payload:
      * ``storage``: the storage's identifier
-     * ``path``: the folders's path within its storage location
-     * ``name``: the folders's name
+     * ``path``: the folder's path within its storage location
+     * ``name``: the folder's name
 
    .. note::
 
       A copied folder triggers this for its new path. A moved folder first triggers ``FolderRemoved`` for its original
       path and then ``FolderAdded`` for the new one.
 
+  .. versionadded:: 1.3.3
+
 FolderRemoved
    A folder has been removed from a storage.
 
    Payload:
      * ``storage``: the storage's identifier
-     * ``path``: the folders's path within its storage location
-     * ``name``: the folders's name
+     * ``path``: the folder's path within its storage location
+     * ``name``: the folder's name
 
    .. note::
 
       A moved folder first triggers ``FolderRemoved`` for its original path and then ``FolderAdded`` for the new one.
+
+  .. versionadded:: 1.3.3
 
 UpdatedFiles
    A file list was modified.
@@ -229,10 +302,11 @@ UpdatedFiles
 
        .. deprecated:: 1.2.0
 
-          The ``gcode`` modification type has been superceeded by ``printables``. It is currently still available for
+          The ``gcode`` modification type has been superseded by ``printables``. It is currently still available for
           reasons of backwards compatibility and will also be sent on modification of ``printables``. It will however
           be removed with 1.4.0.
 
+   .. versionchanged:: 1.4.0
 
 MetadataAnalysisStarted
    The metadata analysis of a file has started.
@@ -245,9 +319,9 @@ MetadataAnalysisStarted
 
    .. deprecated:: 1.3.0
 
-        * ``file``: the file's path within its storage location
+        * ``file``: the file's path within its storage location. To be removed in 1.4.0.
 
-      Still available for reasons of backwards compatibility. Will be removed with 1.4.0.
+  .. versionchanged:: 1.4.0
 
 MetadataAnalysisFinished
    The metadata analysis of a file has finished.
@@ -257,13 +331,13 @@ MetadataAnalysisFinished
      * ``name``: the file's name
      * ``path``: the file's path within its storage location
      * ``origin``: the file's origin storage location
-     * ``result``: the analysis result -- this is a python object currently only available for internal use
+     * ``result``: the analysis result -- this is a Python object currently only available for internal use
 
    .. deprecated:: 1.3.0
 
-        * ``file``: the file's path within its storage location
+        * ``file``: the file's path within its storage location. To be removed in 1.4.0.
 
-      Still available for reasons of backwards compatibility. Will be removed with 1.4.0.
+   .. versionchanged:: 1.4.0
 
 FileSelected
    A file has been selected for printing.
@@ -276,10 +350,10 @@ FileSelected
 
    .. deprecated:: 1.3.0
 
-        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``)
-        * ``filename``: the file's name
+        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``). To be removed in 1.4.0.
+        * ``filename``: the file's name.  To be removed in 1.4.0.
 
-      Still available for reasons of backwards compatibility. Will be removed with 1.4.0.
+   .. versionchanged:: 1.4.0
 
 FileDeselected
    No file is selected any more for printing.
@@ -294,6 +368,8 @@ TransferStarted
 
    **Note:** Name changed in version 1.1.0
 
+   .. versionchanged:: 1.1.0
+
 TransferDone
    A file transfer to the printer's SD has finished.
 
@@ -302,6 +378,8 @@ TransferDone
      * ``time``: the time it took for the transfer to complete in seconds
      * ``local``: the file's name as stored locally
      * ``remote``: the file's name as stored on SD
+
+.. _sec-events-available_events-printing:
 
 Printing
 --------
@@ -314,13 +392,16 @@ PrintStarted
      * ``name``: the file's name
      * ``path``: the file's path within its storage location
      * ``origin``: the origin storage location of the file, either ``local`` or ``sdcard``
+     * ``size``: the file's size in bytes (if available)
+     * ``owner``: the user who started the print job (if available)
+     * ``user``: the user who started the print job (if available)
 
    .. deprecated:: 1.3.0
 
-        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``)
-        * ``filename``: the file's name
+        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``). To be removed in 1.4.0.
+        * ``filename``: the file's name.  To be removed in 1.4.0.
 
-      Still available for reasons of backwards compatibility. Will be removed with 1.4.0.
+   .. versionchanged:: 1.4.0
 
 PrintFailed
    A print failed.
@@ -330,13 +411,17 @@ PrintFailed
      * ``name``: the file's name
      * ``path``: the file's path within its storage location
      * ``origin``: the origin storage location of the file, either ``local`` or ``sdcard``
+     * ``size``: the file's size in bytes (if available)
+     * ``owner``: the user who started the print job (if available)
+     * ``time``: the elapsed time of the print when it failed, in seconds (float)
+     * ``reason``: the reason the print failed, either ``cancelled`` or ``error``
 
    .. deprecated:: 1.3.0
 
-        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``)
-        * ``filename``: the file's name
+        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``). To be removed in 1.4.0.
+        * ``filename``: the file's name.  To be removed in 1.4.0.
 
-      Still available for reasons of backwards compatibility. Will be removed with 1.4.0.
+   .. versionchanged:: 1.4.0
 
 PrintDone
    A print completed successfully.
@@ -346,24 +431,46 @@ PrintDone
      * ``name``: the file's name
      * ``path``: the file's path within its storage location
      * ``origin``: the origin storage location of the file, either ``local`` or ``sdcard``
+     * ``size``: the file's size in bytes (if available)
+     * ``owner``: the user who started the print job (if available)
      * ``time``: the time needed for the print, in seconds (float)
 
    .. deprecated:: 1.3.0
 
-        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``)
-        * ``filename``: the file's name
+        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``). To be removed in 1.4.0.
+        * ``filename``: the file's name.  To be removed in 1.4.0.
 
-      Still available for reasons of backwards compatibility. Will be removed with 1.4.0.
+   .. versionchanged:: 1.4.0
 
-PrintCancelled
-   The print has been cancelled via the cancel button.
+PrintCancelling
+   The print is about to be cancelled.
 
    Payload:
 
      * ``name``: the file's name
      * ``path``: the file's path within its storage location
      * ``origin``: the origin storage location of the file, either ``local`` or ``sdcard``
-     * ``position``: the print head position at the time of cancelling, if available
+     * ``size``: the file's size in bytes (if available)
+     * ``owner``: the user who started the print job (if available)
+     * ``user``: the user who cancelled the print job (if available)
+     * ``firmwareError``: the firmware error that caused cancelling the print job, if any
+
+  .. versionadded:: 1.3.7
+
+PrintCancelled
+   The print has been cancelled.
+
+   Payload:
+
+     * ``name``: the file's name
+     * ``path``: the file's path within its storage location
+     * ``origin``: the origin storage location of the file, either ``local`` or ``sdcard``
+     * ``size``: the file's size in bytes (if available)
+     * ``owner``: the user who started the print job (if available)
+     * ``time``: the elapsed time of the print when it was cancelled, in seconds (float)
+     * ``user``: the user who cancelled the print job (if available)
+     * ``position``: the print head position at the time of cancelling (if available, not available if recording of the
+       position on cancel is disabled)
      * ``position.x``: x coordinate, as reported back from the firmware through `M114`
      * ``position.y``: y coordinate, as reported back from the firmware through `M114`
      * ``position.z``: z coordinate, as reported back from the firmware through `M114`
@@ -377,10 +484,10 @@ PrintCancelled
 
    .. deprecated:: 1.3.0
 
-        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``)
-        * ``filename``: the file's name
+        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``). To be removed in 1.4.0.
+        * ``filename``: the file's name. To be removed in 1.4.0.
 
-      Still available for reasons of backwards compatibility. Will be removed with 1.4.0.
+   .. versionchanged:: 1.4.0
 
 PrintPaused
    The print has been paused.
@@ -390,7 +497,11 @@ PrintPaused
      * ``name``: the file's name
      * ``path``: the file's path within its storage location
      * ``origin``: the origin storage location of the file, either ``local`` or ``sdcard``
-     * ``position``: the print head position at the time of pausing, if available
+     * ``size``: the file's size in bytes (if available)
+     * ``owner``: the user who started the print job (if available)
+     * ``user``: the user who paused the print job (if available)
+     * ``position``: the print head position at the time of pausing (if available, not available if the recording of
+       the position on pause is disabled or the pause is completely handled by the printer's firmware)
      * ``position.x``: x coordinate, as reported back from the firmware through `M114`
      * ``position.y``: y coordinate, as reported back from the firmware through `M114`
      * ``position.z``: z coordinate, as reported back from the firmware through `M114`
@@ -404,10 +515,10 @@ PrintPaused
 
    .. deprecated:: 1.3.0
 
-        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``)
-        * ``filename``: the file's name
+        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``). To be removed in 1.4.0.
+        * ``filename``: the file's name. To be removed in 1.4.0.
 
-      Still available for reasons of backwards compatibility. Will be removed with 1.4.0.
+   .. versionchanged:: 1.4.0
 
 PrintResumed
    The print has been resumed.
@@ -417,13 +528,18 @@ PrintResumed
      * ``name``: the file's name
      * ``path``: the file's path within its storage location
      * ``origin``: the origin storage location of the file, either ``local`` or ``sdcard``
+     * ``size``: the file's size in bytes (if available)
+     * ``owner``: the user who started the print job (if available)
+     * ``user``: the user who resumed the print job (if available)
 
    .. deprecated:: 1.3.0
 
-        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``)
-        * ``filename``: the file's name
+        * ``file``: the file's full path on disk (``local``) or within its storage (``sdcard``). To be removed in 1.4.0.
+        * ``filename``: the file's name. To be removed in 1.4.0.
 
-      Still available for reasons of backwards compatibility. Will be removed with 1.4.0.
+   .. versionchanged:: 1.4.0
+
+.. _sec-events-available_events-gcode_processing:
 
 GCODE processing
 ----------------
@@ -477,6 +593,47 @@ PositionUpdate
      * ``t``: last tool selected *through OctoPrint*
      * ``f``: last feedrate for move commands ``G0``, ``G1`` or ``G28`` sent *through OctoPrint*
 
+   .. versionadded:: 1.3.0
+
+ToolChange
+   A tool change command was sent to the printer. The payload contains the former current tool index and the
+   new current tool index.
+
+   Payload:
+
+     * ``old``: old tool index
+     * ``new``: new tool index
+
+   .. versionadded:: 1.3.5
+
+CommandSuppressed
+   A command was suppressed by OctoPrint due to according configuration and will not be
+   sent to the printer.
+
+   Payload:
+
+     * ``command``: the command that was suppressed
+     * ``message``: a message containing an explanation of the command suppression
+     * ``severity``: a severity level, either ``warn`` or ``info`` - ``warn`` indicates
+       that the command was suppressed probably due to a misconfiguration either inside
+       OctoPrint or the firmware and that it should be investigated by the user
+
+   .. versionadded:: 1.5.0
+
+InvalidToolReported
+   The firmware reported a tool as invalid upon trying to select it. It has thus been marked
+   as invalid and further attempts to select said tool will result in the tool command
+   to get suppressed (and ``SuppressedCommand`` to be generated).
+
+   Payload:
+
+     * ``tool``: the tool number that was reported as invalid by the firmware
+     * ``fallback``: the tool number that OctoPrint will revert to
+
+   .. versionadded:: 1.5.0
+
+.. _sec-events-available_events-timelapses:
+
 Timelapses
 ----------
 
@@ -499,6 +656,8 @@ CaptureFailed
    Payload:
      * ``file``: the name of the image file that should have been saved
      * ``error``: the error that was caught
+
+   .. versionadded:: 1.3.0
 
 MovieRendering
    The timelapse movie has started rendering.
@@ -531,6 +690,8 @@ MovieFailed
        returned a non-0 return code, ``no_frames`` if no frames were captured that could be rendered
        to a timelapse, or ``unknown`` for any other reason of failure to render.
 
+.. _sec-events-available_events-slicing:
+
 Slicing
 -------
 
@@ -539,6 +700,7 @@ SlicingStarted
 
    Payload:
 
+     * ``slicer``: the used slicer
      * ``stl``: the STL's filename
      * ``stl_location``: the STL's location
      * ``gcode``: the sliced GCODE's filename
@@ -550,6 +712,7 @@ SlicingDone
 
    Payload:
 
+     * ``slicer``: the used slicer
      * ``stl``: the STL's filename
      * ``stl_location``: the STL's location
      * ``gcode``: the sliced GCODE's filename
@@ -562,6 +725,7 @@ SlicingCancelled
 
    Payload:
 
+     * ``slicer``: the used slicer
      * ``stl``: the STL's filename
      * ``stl_location``: the STL's location
      * ``gcode``: the sliced GCODE's filename
@@ -572,6 +736,7 @@ SlicingFailed
 
    Payload:
 
+     * ``slicer``: the used slicer
      * ``stl``: the STL's filename
      * ``stl_location``: the STL's location
      * ``gcode``: the sliced GCODE's filename
@@ -586,13 +751,17 @@ SlicingProfileAdded
      * ``slicer``: the slicer for which the profile was added
      * ``profile``: the profile that was added
 
+  .. versionadded:: 1.2.12
+
 SlicingProfileModified
-   A new slicing profile was modified.
+   A slicing profile was modified.
 
    Payload:
 
      * ``slicer``: the slicer for which the profile was modified
      * ``profile``: the profile that was modified
+
+  .. versionadded:: 1.2.12
 
 SlicingProfileDeleted
    A slicing profile was deleted.
@@ -602,8 +771,32 @@ SlicingProfileDeleted
      * ``slicer``: the slicer for which the profile was deleted
      * ``profile``: the profile that was deleted
 
+  .. versionadded:: 1.2.12
+
+.. _sec-events-available_events-settings:
+
 Settings
 --------
 
 SettingsUpdated
-   The internal settings were updated.
+   The settings were updated via the REST API.
+
+   This event may also be triggered if calling code of :py:class:`octoprint.settings.Settings.save` or
+   :py:class:`octoprint.plugin.PluginSettings.save` sets the ``trigger_event`` parameter to ``True``.
+
+   .. versionadded:: 1.2.0
+
+.. _sec-events-available_events-printer_profile:
+
+Printer Profile
+---------------
+
+PrinterProfileModified
+   A printer profile was modified.
+
+   Payload:
+
+     * ``identifier``: the identifier of the modified printer profile
+
+   .. versionadded:: 1.3.12
+

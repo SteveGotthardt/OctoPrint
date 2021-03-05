@@ -1,4 +1,13 @@
-function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSorting, defaultFilters, exclusiveFilters, filesPerPage) {
+function ItemListHelper(
+    listType,
+    supportedSorting,
+    supportedFilters,
+    defaultSorting,
+    defaultFilters,
+    exclusiveFilters,
+    defaultPageSize,
+    persistPageSize
+) {
     var self = this;
 
     self.listType = listType;
@@ -7,6 +16,8 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
     self.defaultSorting = defaultSorting;
     self.defaultFilters = defaultFilters;
     self.exclusiveFilters = exclusiveFilters;
+    self.defaultPageSize = defaultPageSize;
+    self.persistPageSize = !!persistPageSize;
 
     self.searchFunction = undefined;
 
@@ -14,25 +25,33 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
     self.allSize = ko.observable(0);
 
     self.items = ko.observableArray([]);
-    self.pageSize = ko.observable(filesPerPage);
+    self.pageSize = ko.observable(self.defaultPageSize);
     self.currentPage = ko.observable(0);
     self.currentSorting = ko.observable(self.defaultSorting);
     self.currentFilters = ko.observableArray(self.defaultFilters);
     self.selectedItem = ko.observable(undefined);
+    self.filterSearch = ko.observable(true);
+
+    self.storageIds = {
+        currentSorting: self.listType + "." + "currentSorting",
+        currentFilters: self.listType + "." + "currentFilters",
+        pageSize: self.listType + "." + "pageSize"
+    };
 
     //~~ item handling
 
-    self.refresh = function() {
+    self.refresh = function () {
         self._updateItems();
     };
 
-    self.updateItems = function(items) {
+    self.updateItems = function (items) {
+        if (items === undefined) items = [];
         self.allItems = items;
         self.allSize(items.length);
         self._updateItems();
     };
 
-    self.selectItem = function(matcher) {
+    self.selectItem = function (matcher) {
         var itemList = self.items();
         for (var i = 0; i < itemList.length; i++) {
             if (matcher(itemList[i])) {
@@ -42,37 +61,45 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
         }
     };
 
-    self.selectNone = function() {
+    self.selectNone = function () {
         self.selectedItem(undefined);
     };
 
-    self.isSelected = function(data) {
-        return self.selectedItem() == data;
+    self.isSelected = function (data) {
+        return self.selectedItem() === data;
     };
 
-    self.isSelectedByMatcher = function(matcher) {
+    self.isSelectedByMatcher = function (matcher) {
         return matcher(self.selectedItem());
     };
 
-    self.removeItem = function(matcher) {
-        var item = self.getItem(matcher, true);
-        if (item === undefined) {
-            return;
-        }
-
-        var index = self.allItems.indexOf(item);
+    self.removeItem = function (matcher) {
+        var index = self.getIndex(matcher, true);
         if (index > -1) {
             self.allItems.splice(index, 1);
             self._updateItems();
         }
     };
 
+    self.updateItem = function (matcher, item) {
+        var index = self.allItems.findIndex(matcher);
+        if (index > -1) {
+            self.allItems[index] = item;
+            self._updateItems();
+        }
+    };
+
+    self.addItem = function (item) {
+        self.allItems.push(item);
+        self._updateItems();
+    };
+
     //~~ pagination
 
-    self.paginatedItems = ko.dependentObservable(function() {
-        if (self.items() == undefined) {
+    self.paginatedItems = ko.dependentObservable(function () {
+        if (self.items() === undefined) {
             return [];
-        } else if (self.pageSize() == 0) {
+        } else if (self.pageSize() === 0) {
             return self.items();
         } else {
             var from = Math.max(self.currentPage() * self.pageSize(), 0);
@@ -80,42 +107,46 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
             return self.items().slice(from, to);
         }
     });
-    self.lastPage = ko.dependentObservable(function() {
-        return (self.pageSize() == 0 ? 1 : Math.ceil(self.items().length / self.pageSize()) - 1);
+    self.lastPage = ko.dependentObservable(function () {
+        return self.pageSize() === 0
+            ? 1
+            : Math.ceil(self.items().length / self.pageSize()) - 1;
     });
-    self.pages = ko.dependentObservable(function() {
+    self.pages = ko.dependentObservable(function () {
         var pages = [];
-        if (self.pageSize() == 0) {
-            pages.push({ number: 0, text: 1 });
+        var i;
+
+        if (self.pageSize() === 0) {
+            pages.push({number: 0, text: 1});
         } else if (self.lastPage() < 7) {
-            for (var i = 0; i < self.lastPage() + 1; i++) {
-                pages.push({ number: i, text: i+1 });
+            for (i = 0; i < self.lastPage() + 1; i++) {
+                pages.push({number: i, text: i + 1});
             }
         } else {
-            pages.push({ number: 0, text: 1 });
+            pages.push({number: 0, text: 1});
             if (self.currentPage() < 5) {
-                for (var i = 1; i < 5; i++) {
-                    pages.push({ number: i, text: i+1 });
+                for (i = 1; i < 5; i++) {
+                    pages.push({number: i, text: i + 1});
                 }
-                pages.push({ number: -1, text: "…"});
+                pages.push({number: -1, text: "…"});
             } else if (self.currentPage() > self.lastPage() - 5) {
-                pages.push({ number: -1, text: "…"});
-                for (var i = self.lastPage() - 4; i < self.lastPage(); i++) {
-                    pages.push({ number: i, text: i+1 });
+                pages.push({number: -1, text: "…"});
+                for (i = self.lastPage() - 4; i < self.lastPage(); i++) {
+                    pages.push({number: i, text: i + 1});
                 }
             } else {
-                pages.push({ number: -1, text: "…"});
-                for (var i = self.currentPage() - 1; i <= self.currentPage() + 1; i++) {
-                    pages.push({ number: i, text: i+1 });
+                pages.push({number: -1, text: "…"});
+                for (i = self.currentPage() - 1; i <= self.currentPage() + 1; i++) {
+                    pages.push({number: i, text: i + 1});
                 }
-                pages.push({ number: -1, text: "…"});
+                pages.push({number: -1, text: "…"});
             }
-            pages.push({ number: self.lastPage(), text: self.lastPage() + 1})
+            pages.push({number: self.lastPage(), text: self.lastPage() + 1});
         }
         return pages;
     });
 
-    self.switchToItem = function(matcher) {
+    self.switchToItem = function (matcher) {
         var pos = -1;
         var itemList = self.items();
         for (var i = 0; i < itemList.length; i++) {
@@ -131,38 +162,47 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
         }
     };
 
-    self.changePage = function(newPage) {
-        if (newPage < 0 || newPage > self.lastPage())
-            return;
+    self.changePage = function (newPage) {
+        if (newPage < 0 || newPage > self.lastPage()) return;
         self.currentPage(newPage);
-    };    self.prevPage = function() {
+    };
+    self.prevPage = function () {
         if (self.currentPage() > 0) {
             self.currentPage(self.currentPage() - 1);
         }
     };
-    self.nextPage = function() {
+    self.nextPage = function () {
         if (self.currentPage() < self.lastPage()) {
             self.currentPage(self.currentPage() + 1);
         }
     };
 
-    self.getItem = function(matcher, all) {
+    self.getIndex = function (matcher, all) {
         var itemList;
         if (all !== undefined && all === true) {
             itemList = self.allItems;
         } else {
             itemList = self.items();
         }
+
         for (var i = 0; i < itemList.length; i++) {
             if (matcher(itemList[i])) {
-                return itemList[i];
+                return i;
             }
         }
-
-        return undefined;
+        return -1;
     };
 
-    self.resetPage = function() {
+    self.getItem = function (matcher, all) {
+        var index = self.getIndex(matcher, all);
+        if (all !== undefined && all === true) {
+            return index > -1 ? self.allItems[index] : undefined;
+        } else {
+            return index > -1 ? self.items()[index] : undefined;
+        }
+    };
+
+    self.resetPage = function () {
         if (self.currentPage() > self.lastPage()) {
             self.currentPage(self.lastPage());
         }
@@ -170,21 +210,20 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
 
     //~~ searching
 
-    self.changeSearchFunction = function(searchFunction) {
+    self.changeSearchFunction = function (searchFunction) {
         self.searchFunction = searchFunction;
         self.changePage(0);
         self._updateItems();
     };
 
-    self.resetSearch = function() {
+    self.resetSearch = function () {
         self.changeSearchFunction(undefined);
     };
 
     //~~ sorting
 
-    self.changeSorting = function(sorting) {
-        if (!_.contains(_.keys(self.supportedSorting), sorting))
-            return;
+    self.changeSorting = function (sorting) {
+        if (!_.contains(_.keys(self.supportedSorting), sorting)) return;
 
         self.currentSorting(sorting);
         self._saveCurrentSortingToLocalStorage();
@@ -195,9 +234,20 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
 
     //~~ filtering
 
-    self.toggleFilter = function(filter) {
-        if (!_.contains(_.keys(self.supportedFilters), filter))
-            return;
+    self.setFilterSearch = function (enabled) {
+        if (self.filterSearch() === enabled) return;
+
+        self.filterSearch(enabled);
+        self.changePage(0);
+        self._updateItems();
+    };
+
+    self.toggleFilterSearch = function () {
+        self.setFilterSearch(!self.filterSearch());
+    };
+
+    self.toggleFilter = function (filter) {
+        if (!_.contains(_.keys(self.supportedFilters), filter)) return;
 
         if (_.contains(self.currentFilters(), filter)) {
             self.removeFilter(filter);
@@ -206,15 +256,13 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
         }
     };
 
-    self.addFilter = function(filter) {
-        if (!_.contains(_.keys(self.supportedFilters), filter))
-            return;
+    self.addFilter = function (filter) {
+        if (!_.contains(_.keys(self.supportedFilters), filter)) return;
 
         for (var i = 0; i < self.exclusiveFilters.length; i++) {
             if (_.contains(self.exclusiveFilters[i], filter)) {
                 for (var j = 0; j < self.exclusiveFilters[i].length; j++) {
-                    if (self.exclusiveFilters[i][j] == filter)
-                        continue;
+                    if (self.exclusiveFilters[i][j] === filter) continue;
                     self.removeFilter(self.exclusiveFilters[i][j]);
                 }
             }
@@ -229,9 +277,8 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
         self._updateItems();
     };
 
-    self.removeFilter = function(filter) {
-        if (!_.contains(_.keys(self.supportedFilters), filter))
-            return;
+    self.removeFilter = function (filter) {
+        if (!_.contains(_.keys(self.supportedFilters), filter)) return;
 
         var filters = self.currentFilters();
         filters = _.without(filters, filter);
@@ -244,32 +291,41 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
 
     //~~ update for sorted and filtered view
 
-    self._updateItems = function() {
+    self._updateItems = function () {
         // determine comparator
         var comparator = undefined;
         var currentSorting = self.currentSorting();
-        if (typeof currentSorting !== 'undefined' && typeof self.supportedSorting[currentSorting] !== 'undefined') {
+        if (
+            typeof currentSorting !== "undefined" &&
+            typeof self.supportedSorting[currentSorting] !== "undefined"
+        ) {
             comparator = self.supportedSorting[currentSorting];
         }
 
         // work on all items
         var result = self.allItems;
 
-        // filter if necessary
-        var filters = self.currentFilters();
-        _.each(filters, function(filter) {
-            if (typeof filter !== 'undefined' && typeof supportedFilters[filter] !== 'undefined')
-                result = _.filter(result, supportedFilters[filter]);
-        });
+        var hasSearch = typeof self.searchFunction !== "undefined" && self.searchFunction;
+
+        // filter if we're not searching or have search filtering enabled
+        if (!hasSearch || self.filterSearch()) {
+            var filters = self.currentFilters();
+            _.each(filters, function (filter) {
+                if (
+                    typeof filter !== "undefined" &&
+                    typeof supportedFilters[filter] !== "undefined"
+                )
+                    result = _.filter(result, supportedFilters[filter]);
+            });
+        }
 
         // search if necessary
-        if (typeof self.searchFunction !== 'undefined' && self.searchFunction) {
+        if (hasSearch) {
             result = _.filter(result, self.searchFunction);
         }
 
         // sort if necessary
-        if (typeof comparator !== 'undefined')
-            result.sort(comparator);
+        if (typeof comparator !== "undefined") result.sort(comparator);
 
         // set result list
         self.items(result);
@@ -277,53 +333,86 @@ function ItemListHelper(listType, supportedSorting, supportedFilters, defaultSor
 
     //~~ local storage
 
-    self._saveCurrentSortingToLocalStorage = function() {
-        if ( self._initializeLocalStorage() ) {
+    self._saveCurrentSortingToLocalStorage = function () {
+        if (self._initializeLocalStorage()) {
             var currentSorting = self.currentSorting();
             if (currentSorting !== undefined)
-                localStorage[self.listType + "." + "currentSorting"] = currentSorting;
-            else
-                localStorage[self.listType + "." + "currentSorting"] = undefined;
+                localStorage[self.storageIds.currentSorting] = currentSorting;
+            else localStorage[self.storageIds.currentSorting] = undefined;
         }
     };
 
-    self._loadCurrentSortingFromLocalStorage = function() {
-        if ( self._initializeLocalStorage() ) {
-            if (_.contains(_.keys(supportedSorting), localStorage[self.listType + "." + "currentSorting"]))
-                self.currentSorting(localStorage[self.listType + "." + "currentSorting"]);
-            else
-                self.currentSorting(defaultSorting);
+    self._loadCurrentSortingFromLocalStorage = function () {
+        if (self._initializeLocalStorage()) {
+            if (
+                _.contains(
+                    _.keys(supportedSorting),
+                    localStorage[self.storageIds.currentSorting]
+                )
+            )
+                self.currentSorting(localStorage[self.storageIds.currentSorting]);
+            else self.currentSorting(defaultSorting);
         }
     };
 
-    self._saveCurrentFiltersToLocalStorage = function() {
-        if ( self._initializeLocalStorage() ) {
-            var filters = _.intersection(_.keys(self.supportedFilters), self.currentFilters());
-            localStorage[self.listType + "." + "currentFilters"] = JSON.stringify(filters);
+    self._saveCurrentFiltersToLocalStorage = function () {
+        if (self._initializeLocalStorage()) {
+            var filters = _.intersection(
+                _.keys(self.supportedFilters),
+                self.currentFilters()
+            );
+            localStorage[self.storageIds.currentFilters] = JSON.stringify(filters);
         }
     };
 
-    self._loadCurrentFiltersFromLocalStorage = function() {
-        if ( self._initializeLocalStorage() ) {
-            self.currentFilters(_.intersection(_.keys(self.supportedFilters), JSON.parse(localStorage[self.listType + "." + "currentFilters"])));
+    self._loadCurrentFiltersFromLocalStorage = function () {
+        if (self._initializeLocalStorage()) {
+            self.currentFilters(
+                _.intersection(
+                    _.keys(self.supportedFilters),
+                    JSON.parse(localStorage[self.storageIds.currentFilters])
+                )
+            );
         }
     };
 
-    self._initializeLocalStorage = function() {
-        if (!Modernizr.localstorage)
-            return false;
+    self._savePageSizeToLocalStorage = function (pageSize) {
+        if (self._initializeLocalStorage() && self.persistPageSize) {
+            localStorage[self.storageIds.pageSize] = pageSize;
+        }
+    };
 
-        if (localStorage[self.listType + "." + "currentSorting"] !== undefined && localStorage[self.listType + "." + "currentFilters"] !== undefined && JSON.parse(localStorage[self.listType + "." + "currentFilters"]) instanceof Array)
+    self.pageSize.subscribe(self._savePageSizeToLocalStorage);
+
+    self._loadPageSizeFromLocalStorage = function () {
+        if (self._initializeLocalStorage() && self.persistPageSize) {
+            self.pageSize(parseInt(localStorage[self.storageIds.pageSize]));
+        }
+    };
+
+    self._initializeLocalStorage = function () {
+        if (!Modernizr.localstorage) return false;
+
+        if (
+            localStorage[self.storageIds.currentSorting] !== undefined &&
+            localStorage[self.storageIds.currentFilters] !== undefined &&
+            JSON.parse(localStorage[self.storageIds.currentFilters]) instanceof Array &&
+            localStorage[self.storageIds.pageSize] !== undefined
+        )
             return true;
 
-        localStorage[self.listType + "." + "currentSorting"] = self.defaultSorting;
-        localStorage[self.listType + "." + "currentFilters"] = JSON.stringify(self.defaultFilters);
+        localStorage[self.storageIds.currentSorting] = self.defaultSorting;
+        localStorage[self.storageIds.currentFilters] = JSON.stringify(
+            self.defaultFilters
+        );
+        localStorage[self.storageIds.pageSize] = self.defaultPageSize;
 
         return true;
     };
 
     self._loadCurrentFiltersFromLocalStorage();
     self._loadCurrentSortingFromLocalStorage();
+    self._loadPageSizeFromLocalStorage();
 }
 
 function formatSize(bytes) {
@@ -339,14 +428,21 @@ function formatSize(bytes) {
     return _.sprintf("%.1f%s", bytes, "TB");
 }
 
+function formatHuman(number) {
+    if (number === undefined) return "-";
+    if (number < 1000) return number;
+
+    return _.sprintf("%.1fK", number / 1000);
+}
+
 function bytesFromSize(size) {
-    if (size == undefined || size.trim() == "") return undefined;
+    if (size === undefined || size.trim() === "") return undefined;
 
     var parsed = size.match(/^([+]?[0-9]*\.?[0-9]+)(?:\s*)?(.*)$/);
     var number = parsed[1];
     var unit = parsed[2].trim();
 
-    if (unit == "") return parseFloat(number);
+    if (unit === "") return parseFloat(number);
 
     var units = {
         b: 1,
@@ -375,14 +471,17 @@ function formatDuration(seconds) {
     var m = (seconds % 3600) / 60;
     var h = seconds / 3600;
 
-    return _.sprintf(gettext(/* L10N: duration format */ "%(hour)02d:%(minute)02d:%(second)02d"), {hour: h, minute: m, second: s});
+    return _.sprintf(
+        gettext(/* L10N: duration format */ "%(hour)02d:%(minute)02d:%(second)02d"),
+        {hour: h, minute: m, second: s}
+    );
 }
 
 function formatFuzzyEstimation(seconds, base) {
     if (!seconds || seconds < 1) return "-";
 
     var m;
-    if (base != undefined) {
+    if (base !== undefined) {
         m = moment(base);
     } else {
         m = moment();
@@ -416,7 +515,7 @@ function formatFuzzyPrintTime(totalSeconds) {
     var seconds = d.seconds();
     var minutes = d.minutes();
     var hours = d.hours();
-    var days = d.asDays();
+    var days = d.days();
 
     var replacements = {
         days: days,
@@ -432,11 +531,16 @@ function formatFuzzyPrintTime(totalSeconds) {
         // days
         if (hours >= 16) {
             replacements.days += 1;
-            text = gettext("%(days)d days");
+
+            if (replacements.days === 1) {
+                text = gettext("%(days)d day");
+            } else {
+                text = gettext("%(days)d days");
+            }
         } else if (hours >= 8 && hours < 16) {
             text = gettext("%(days)d.5 days");
         } else {
-            if (days == 1) {
+            if (days === 1) {
                 text = gettext("%(days)d day");
             } else {
                 text = gettext("%(days)d days");
@@ -447,7 +551,7 @@ function formatFuzzyPrintTime(totalSeconds) {
         if (hours < 12) {
             if (minutes < 15) {
                 // less than .15 => .0
-                if (hours == 1) {
+                if (hours === 1) {
                     text = gettext("%(hours)d hour");
                 } else {
                     text = gettext("%(hours)d hours");
@@ -458,10 +562,15 @@ function formatFuzzyPrintTime(totalSeconds) {
             } else {
                 // over .75 => hours + 1
                 replacements.hours += 1;
-                text = gettext("%(hours)d hours");
+
+                if (replacements.hours === 1) {
+                    text = gettext("%(hours)d hour");
+                } else {
+                    text = gettext("%(hours)d hours");
+                }
             }
         } else {
-            if (hours == 23 && minutes > 30) {
+            if (hours === 23 && minutes > 30) {
                 // over 23.5 hours => 1 day
                 text = gettext("1 day");
             } else {
@@ -504,9 +613,19 @@ function formatFuzzyPrintTime(totalSeconds) {
     return _.sprintf(text, replacements);
 }
 
-function formatDate(unixTimestamp) {
+function formatDate(unixTimestamp, options) {
+    if (!options) {
+        options = {seconds: false};
+    }
+
     if (!unixTimestamp) return "-";
-    return moment.unix(unixTimestamp).format(gettext(/* L10N: Date format */ "YYYY-MM-DD HH:mm"));
+
+    var format = gettext(/* L10N: Date format */ "YYYY-MM-DD HH:mm");
+    if (options.seconds) {
+        format = gettext(/* L10N: Date format with seconds */ "YYYY-MM-DD HH:mm:ss");
+    }
+
+    return moment.unix(unixTimestamp).format(format);
 }
 
 function formatTimeAgo(unixTimestamp) {
@@ -520,46 +639,64 @@ function formatFilament(filament) {
     if (filament.hasOwnProperty("volume") && filament.volume) {
         result += " / " + "%(volume).02fcm³";
     }
-    return _.sprintf(result, {length: filament["length"] / 1000, volume: filament["volume"]});
+    return _.sprintf(result, {
+        length: filament["length"] / 1000,
+        volume: filament["volume"]
+    });
 }
 
-function cleanTemperature(temp) {
-    if (!temp || temp < 10) return gettext("off");
+function cleanTemperature(temp, offThreshold) {
+    if (temp === undefined || !_.isNumber(temp)) return "-";
+    if (offThreshold !== undefined && temp < offThreshold) return gettext("off");
     return temp;
 }
 
-function formatTemperature(temp, showF) {
-    if (!temp || temp < 10) return gettext("off");
+function formatTemperature(temp, showF, offThreshold) {
+    if (temp === undefined || !_.isNumber(temp)) return "-";
+    if (offThreshold !== undefined && temp < offThreshold) return gettext("off");
     if (showF) {
-        return _.sprintf("%.1f&deg;C (%.1f&deg;F)", temp, temp * 9 / 5 + 32);
+        return _.sprintf("%.1f&deg;C (%.1f&deg;F)", temp, (temp * 9) / 5 + 32);
     } else {
         return _.sprintf("%.1f&deg;C", temp);
     }
 }
 
+function formatNumberK(num) {
+    if (num > 1000) {
+        num = num / 1000.0;
+        return _.sprintf("%.2fk", num);
+    } else {
+        return _.sprintf("%i", num);
+    }
+}
+
 function pnotifyAdditionalInfo(inner) {
-    return '<div class="pnotify_additional_info">'
-        + '<div class="pnotify_more"><a href="#" onclick="$(this).children().toggleClass(\'icon-caret-right icon-caret-down\').parent().parent().next().slideToggle(\'fast\')">More <i class="icon-caret-right"></i></a></div>'
-        + '<div class="pnotify_more_container hide">' + inner + '</div>'
-        + '</div>';
+    return (
+        '<div class="pnotify_additional_info">' +
+        '<div class="pnotify_more"><a href="#" onclick="$(this).children().toggleClass(\'icon-caret-right icon-caret-down\').parent().parent().next().slideToggle(\'fast\')">More <i class="icon-caret-right"></i></a></div>' +
+        '<div class="pnotify_more_container hide">' +
+        inner +
+        "</div>" +
+        "</div>"
+    );
 }
 
 function ping(url, callback) {
     var img = new Image();
     var calledBack = false;
 
-    img.onload = function() {
+    img.onload = function () {
         callback(true);
         calledBack = true;
     };
-    img.onerror = function() {
+    img.onerror = function () {
         if (!calledBack) {
             callback(true);
             calledBack = true;
         }
     };
     img.src = url;
-    setTimeout(function() {
+    setTimeout(function () {
         if (!calledBack) {
             callback(false);
             calledBack = true;
@@ -568,15 +705,16 @@ function ping(url, callback) {
 }
 
 function showOfflineOverlay(title, message, reconnectCallback) {
-    if (title == undefined) {
+    if (title === undefined) {
         title = gettext("Server is offline");
     }
 
     $("#offline_overlay_title").text(title);
     $("#offline_overlay_message").html(message);
     $("#offline_overlay_reconnect").click(reconnectCallback);
-    if (!$("#offline_overlay").is(":visible"))
-        $("#offline_overlay").show();
+
+    var overlay = $("#offline_overlay");
+    if (!overlay.is(":visible")) overlay.show();
 }
 
 function hideOfflineOverlay() {
@@ -597,22 +735,34 @@ function showMessageDialog(msg, options) {
     var onclose = options.onclose || undefined;
     var onshow = options.onshow || undefined;
     var onshown = options.onshown || undefined;
+    var nofade = options.nofade || false;
 
     if (_.isString(message)) {
         message = $("<p>" + message + "</p>");
     }
 
-    var modalHeader = $('<a href="javascript:void(0)" class="close" data-dismiss="modal" aria-hidden="true">&times;</a><h3>' + title + '</h3>');
+    var modalHeader = $(
+        '<a href="javascript:void(0)" class="close" data-dismiss="modal" aria-hidden="true">&times;</a><h3>' +
+            title +
+            "</h3>"
+    );
     var modalBody = $(message);
-    var modalFooter = $('<a href="javascript:void(0)" class="btn" data-dismiss="modal" aria-hidden="true">' + close + '</a>');
+    var modalFooter = $(
+        '<a href="javascript:void(0)" class="btn" data-dismiss="modal" aria-hidden="true">' +
+            close +
+            "</a>"
+    );
 
-    var modal = $('<div></div>')
-        .addClass('modal hide fade')
-        .append($('<div></div>').addClass('modal-header').append(modalHeader))
-        .append($('<div></div>').addClass('modal-body').append(modalBody))
-        .append($('<div></div>').addClass('modal-footer').append(modalFooter));
+    var modal = $("<div></div>").addClass("modal hide");
+    if (!nofade) {
+        modal.addClass("fade");
+    }
+    modal
+        .append($("<div></div>").addClass("modal-header").append(modalHeader))
+        .append($("<div></div>").addClass("modal-body").append(modalBody))
+        .append($("<div></div>").addClass("modal-footer").append(modalFooter));
 
-    modal.on("hidden", function() {
+    modal.on("hidden", function () {
         if (onclose && _.isFunction(onclose)) {
             onclose();
         }
@@ -640,37 +790,206 @@ function showConfirmationDialog(msg, onacknowledge, options) {
     }
 
     var title = options.title || gettext("Are you sure?");
+
     var message = options.message || "";
     var question = options.question || gettext("Are you sure you want to proceed?");
+
+    var html = options.html;
+
+    var checkboxes = options.checkboxes;
+
     var cancel = options.cancel || gettext("Cancel");
     var proceed = options.proceed || gettext("Proceed");
     var proceedClass = options.proceedClass || "danger";
     var onproceed = options.onproceed || undefined;
+    var oncancel = options.oncancel || undefined;
+    var onclose = options.onclose || undefined;
     var dialogClass = options.dialogClass || "";
+    var nofade = options.nofade || false;
+    var noclose = options.noclose || false;
 
-    var modalHeader = $('<a href="javascript:void(0)" class="close" data-dismiss="modal" aria-hidden="true">&times;</a><h3>' + title + '</h3>');
-    var modalBody = $('<p>' + message + '</p><p>' + question + '</p>');
+    var modalHeader;
+    if (noclose) {
+        modalHeader = $("<h3>" + title + "</h3>");
+    } else {
+        modalHeader = $(
+            '<a href="javascript:void(0)" class="close" data-dismiss="modal" aria-hidden="true">&times;</a><h3>' +
+                title +
+                "</h3>"
+        );
+    }
 
-    var cancelButton = $('<a href="javascript:void(0)" class="btn">' + cancel + '</a>')
+    var modalBody;
+    if (html) {
+        modalBody = $(html);
+    } else {
+        modalBody = $("<p>" + message + "</p><p>" + question + "</p>");
+    }
+
+    var cancelButton = $('<a href="javascript:void(0)" class="btn">' + cancel + "</a>")
         .attr("data-dismiss", "modal")
         .attr("aria-hidden", "true");
-    var proceedButton = $('<a href="javascript:void(0)" class="btn">' + proceed + '</a>')
-        .addClass("btn-" + proceedClass);
 
-    var modal = $('<div></div>')
-        .addClass('modal hide fade')
+    if (!_.isArray(proceed)) {
+        proceed = [proceed];
+    }
+
+    var proceedButtons = [];
+    _.each(proceed, function (text) {
+        proceedButtons.push(
+            $('<a href="javascript:void(0)" class="btn">' + text + "</a>").addClass(
+                "btn-" + proceedClass
+            )
+        );
+    });
+
+    var modal = $("<div></div>").addClass("modal hide");
+    if (!nofade) {
+        modal.addClass("fade");
+    }
+
+    var buttons = $("<div></div>").addClass("modal-footer").append(cancelButton);
+    _.each(proceedButtons, function (button) {
+        buttons.append(button);
+    });
+
+    modal
         .addClass(dialogClass)
-        .append($('<div></div>').addClass('modal-header').append(modalHeader))
-        .append($('<div></div>').addClass('modal-body').append(modalBody))
-        .append($('<div></div>').addClass('modal-footer').append(cancelButton).append(proceedButton));
+        .append($("<div></div>").addClass("modal-header").append(modalHeader))
+        .append($("<div></div>").addClass("modal-body").append(modalBody))
+        .append(buttons);
+    modal.on("hidden", function (event) {
+        if (onclose && _.isFunction(onclose)) {
+            onclose(event);
+        }
+    });
+
+    var modalOptions = {};
+    if (noclose) {
+        modalOptions.backdrop = "static";
+        modalOptions.keyboard = false;
+    }
+    modal.modal(modalOptions);
+
+    _.each(proceedButtons, function (button, idx) {
+        button.click(function (e) {
+            e.preventDefault();
+            if (onproceed && _.isFunction(onproceed)) {
+                onproceed(idx, e);
+            }
+            modal.modal("hide");
+        });
+    });
+    cancelButton.click(function (e) {
+        if (oncancel && _.isFunction(oncancel)) {
+            oncancel(e);
+        }
+    });
+
+    return modal;
+}
+
+function showSelectionDialog(options) {
+    var title = options.title;
+    var message = options.message || undefined;
+    var selections = options.selections || [];
+
+    var maycancel = options.maycancel || false;
+    var cancel = options.cancel || undefined;
+    var onselect = options.onselect || undefined;
+    var onclose = options.onclose || undefined;
+    var dialogClass = options.dialogClass || "";
+    var nofade = options.nofade || false;
+
+    // header
+    var modalHeader;
+    if (maycancel) {
+        modalHeader = $(
+            '<a href="javascript:void(0)" class="close" data-dismiss="modal" aria-hidden="true">&times;</a><h3>' +
+                title +
+                "</h3>"
+        );
+    } else {
+        modalHeader = $("<h3>" + title + "</h3>");
+    }
+
+    // body
+    var buttons = [];
+    var selectionBody = $("<div></div>");
+    var container;
+    var additionalClass;
+
+    if (selections.length === 1) {
+        container = selectionBody;
+        additionalClass = "btn-block";
+    } else if (selections.length === 2) {
+        container = $("<div class='row-fluid'></div>");
+        selectionBody.append(container);
+        additionalClass = "span6";
+    } else {
+        container = selectionBody;
+        additionalClass = "btn-block";
+    }
+
+    _.each(selections, function (s, i) {
+        var button = $(
+            '<button class="btn" style="white-space: normal; word-wrap: break-word" data-index="' +
+                i +
+                '">' +
+                selections[i] +
+                "</button>"
+        );
+        if (additionalClass) {
+            button.addClass(additionalClass);
+        }
+        container.append(button);
+        buttons.push(button);
+
+        if (selections.length > 2 && i < selections.length - 1) {
+            container = $("<div class='row-fluid'></div>");
+            selectionBody.append(container);
+        }
+    });
+
+    // divs
+    var headerDiv = $("<div></div>").addClass("modal-header").append(modalHeader);
+
+    var bodyDiv = $("<div></div>").addClass("modal-body");
+    if (message) {
+        bodyDiv.append($("<p>" + message + "</p>"));
+    }
+    bodyDiv.append(selectionBody);
+
+    // create modal and do final wiring up
+    var modal = $("<div></div>").addClass("modal hide");
+    if (!nofade) {
+        modal.addClass("fade");
+    }
+    if (!cancel) {
+        modal.data("backdrop", "static").data("keyboard", "false");
+    }
+
+    modal.addClass(dialogClass).append(headerDiv).append(bodyDiv);
+    modal.on("hidden", function (event) {
+        if (onclose && _.isFunction(onclose)) {
+            onclose(event);
+        }
+    });
     modal.modal("show");
 
-    proceedButton.click(function(e) {
-        e.preventDefault();
-        modal.modal("hide");
-        if (onproceed && _.isFunction(onproceed)) {
-            onproceed(e);
-        }
+    _.each(buttons, function (button) {
+        button.click(function (e) {
+            e.preventDefault();
+            var index = button.data("index");
+            if (index < 0) {
+                return;
+            }
+
+            if (onselect && _.isFunction(onselect)) {
+                onselect(index, e);
+            }
+            modal.modal("hide");
+        });
     });
 
     return modal;
@@ -682,9 +1001,14 @@ function showConfirmationDialog(msg, onacknowledge, options) {
  * Will listen to the supplied promise, update the progress on .progress events and
  * enabling the close button and (optionally) closing the dialog on promise resolve.
  *
- * The calling code should call "notify" on the deferred backing the promise and supply
- * two parameters: the text to display on the progress bar and the optional output field and
- * a boolean value indicating whether the operation behind that update was successful or not.
+ * The calling code should call "notify" on the deferred backing the promise and supply:
+ *
+ *   * the text to display on the progress bar and the optional output field and
+ *     a boolean value indicating whether the operation behind that update was successful or not
+ *   * a short text to display on the progress bar, a long text to display on the optional output
+ *     field and a boolean value indicating whether the operation behind that update was
+ *     successful or not
+ *
  * Non-successful progress updates will remove the barClassSuccess class from the progress bar and
  * apply the barClassFailure class and also apply the outputClassFailure to the produced line
  * in the output.
@@ -731,92 +1055,107 @@ function showProgressModal(options, promise) {
     var outputClassSuccess = options.outputClassSuccess || "";
     var outputClassFailure = options.outputClassFailure || "text-error";
 
-    var modalHeader = $('<h3>' + title + '</h3>');
-    var paragraph = $('<p>' + message + '</p>');
+    var modalHeader = $("<h3>" + title + "</h3>");
+    var paragraph = $("<p>" + message + "</p>");
 
     var progress = $('<div class="progress progress-text-centered"></div>');
-    var progressBar = $('<div class="bar"></div>')
-        .addClass(barClassSuccess);
+    var progressBar = $('<div class="bar"></div>').addClass(barClassSuccess);
     var progressTextBack = $('<span class="progress-text-back"></span>');
-    var progressTextFront = $('<span class="progress-text-front"></span>')
-        .width(progress.width());
+    var progressTextFront = $('<span class="progress-text-front"></span>').width(
+        progress.width()
+    );
 
-    if (max == undefined) {
+    if (max === undefined) {
         progress.addClass("progress-striped active");
         progressBar.width("100%");
     }
 
-    progressBar
-        .append(progressTextFront);
-    progress
-        .append(progressTextBack)
-        .append(progressBar);
+    progressBar.append(progressTextFront);
+    progress.append(progressTextBack).append(progressBar);
 
-    var button = $('<button class="btn">' + buttonText + '</button>')
+    var button = $('<button class="btn">' + buttonText + "</button>")
         .prop("disabled", true)
         .attr("data-dismiss", "modal")
         .attr("aria-hidden", "true");
 
-    var modalBody = $('<div></div>')
-        .addClass('modal-body')
+    var modalBody = $("<div></div>")
+        .addClass("modal-body")
         .append(paragraph)
         .append(progress);
 
     var pre;
     if (output) {
-        pre = $("<pre class='terminal pre-scrollable' style='height: 70px; font-size: 0.8em'></pre>");
+        pre = $(
+            "<pre class='pre-scrollable pre-output' style='height: 70px; font-size: 0.8em'></pre>"
+        );
         modalBody.append(pre);
     }
 
-    var modal = $('<div></div>')
-        .addClass('modal hide fade')
+    var modal = $("<div></div>")
+        .addClass("modal hide fade")
         .addClass(dialogClass)
-        .append($('<div></div>').addClass('modal-header').append(modalHeader))
+        .append($("<div></div>").addClass("modal-header").append(modalHeader))
         .append(modalBody)
-        .append($('<div></div>').addClass('modal-footer').append(button));
+        .append($("<div></div>").addClass("modal-footer").append(button));
     modal.modal({keyboard: false, backdrop: "static", show: true});
 
     var counter = 0;
     promise
-        .progress(function(text, success) {
+        .progress(function () {
+            var short, long, success;
+            if (arguments.length === 2) {
+                short = long = arguments[0];
+                success = arguments[1];
+            } else if (arguments.length === 3) {
+                short = arguments[0];
+                long = arguments[1];
+                success = arguments[2];
+            } else {
+                throw Error(
+                    "Invalid parameters for showProgressModal, expected either (text, success) or (short, long, success)"
+                );
+            }
+
             var value;
 
             if (max === undefined || max <= 0) {
                 value = 100;
             } else {
                 counter++;
-                value = Math.max(Math.min(counter * 100 / max, 100), 0);
+                value = Math.max(Math.min((counter * 100) / max, 100), 0);
             }
 
             // update progress bar
             progressBar.width(String(value) + "%");
-            progressTextFront.text(text);
-            progressTextBack.text(text);
+            progressTextFront.text(short);
+            progressTextBack.text(short);
             progressTextFront.width(progress.width());
 
             // if not successful, apply failure class
             if (!success && !progressBar.hasClass(barClassFailure)) {
-                progressBar
-                    .removeClass(barClassSuccess)
-                    .addClass(barClassFailure);
+                progressBar.removeClass(barClassSuccess).addClass(barClassFailure);
             }
 
             if (output && pre) {
                 if (success) {
-                    pre.append($("<span class='" + outputClassSuccess + "'>" + text + "</span><br>"));
+                    pre.append(
+                        $("<span class='" + outputClassSuccess + "'>" + long + "</span>")
+                    );
                 } else {
-                    pre.append($("<span class='" + outputClassFailure + "'>" + text + "</span><br>"));
+                    pre.append(
+                        $("<span class='" + outputClassFailure + "'>" + long + "</span>")
+                    );
                 }
                 pre.scrollTop(pre[0].scrollHeight - pre.height());
             }
         })
-        .done(function() {
+        .done(function () {
             button.prop("disabled", false);
             if (close) {
                 modal.modal("hide");
             }
         })
-        .fail(function() {
+        .fail(function () {
             button.prop("disabled", false);
         });
 
@@ -829,21 +1168,26 @@ function showReloadOverlay() {
 
 function wrapPromiseWithAlways(p) {
     var deferred = $.Deferred();
-    p.always(function() { deferred.resolve.apply(deferred, arguments); });
+    p.always(function () {
+        deferred.resolve.apply(deferred, arguments);
+    });
     return deferred.promise();
 }
 
 function commentableLinesToArray(lines) {
-    return splitTextToArray(lines, "\n", true, function(item) {return !_.startsWith(item, "#")});
+    return splitTextToArray(lines, "\n", true, function (item) {
+        return !_.startsWith(item, "#");
+    });
 }
 
 function splitTextToArray(text, sep, stripEmpty, filter) {
     return _.filter(
-        _.map(
-            text.split(sep),
-            function(item) { return (item) ? item.trim() : ""; }
-        ),
-        function(item) { return (stripEmpty ? item : true) && (filter ? filter(item) : true); }
+        _.map(text.split(sep), function (item) {
+            return item ? item.trim() : "";
+        }),
+        function (item) {
+            return (stripEmpty ? item : true) && (filter ? filter(item) : true);
+        }
     );
 }
 
@@ -876,16 +1220,15 @@ function splitTextToArray(text, sep, stripEmpty, filter) {
  * and is optimized to check for value changes, not key updates.
  */
 function hasDataChanged(data, oldData) {
-    if (data == undefined) {
+    // noinspection EqualityComparisonWithCoercionJS
+    if (data == oldData && data == undefined) {
         return false;
     }
 
-    if (oldData == undefined) {
-        return true;
-    }
-
-    if (_.isPlainObject(data)) {
-        return _.any(_.keys(data), function(key) {return hasDataChanged(data[key], oldData[key]);});
+    if (_.isPlainObject(data) && _.isPlainObject(oldData)) {
+        return _.any(_.keys(data), function (key) {
+            return hasDataChanged(data[key], oldData[key]);
+        });
     } else {
         return !_.isEqual(data, oldData);
     }
@@ -921,33 +1264,41 @@ function hasDataChanged(data, oldData) {
  * and is optimized to check for value changes, not key updates.
  */
 function getOnlyChangedData(data, oldData) {
+    // noinspection EqualityComparisonWithCoercionJS
     if (data == undefined) {
         return {};
     }
 
+    // noinspection EqualityComparisonWithCoercionJS
     if (oldData == undefined) {
         return data;
     }
 
-    var f = function(root, oldRoot) {
+    var f = function (root, oldRoot) {
         if (!_.isPlainObject(root)) {
             return root;
         }
 
         var retval = {};
-        _.forOwn(root, function(value, key) {
+        _.forOwn(root, function (value, key) {
             var oldValue = undefined;
+            // noinspection EqualityComparisonWithCoercionJS
             if (oldRoot != undefined && oldRoot.hasOwnProperty(key)) {
                 oldValue = oldRoot[key];
             }
             if (_.isPlainObject(value)) {
+                // noinspection EqualityComparisonWithCoercionJS
                 if (oldValue == undefined) {
                     retval[key] = value;
                 } else if (hasDataChanged(value, oldValue)) {
                     retval[key] = f(value, oldValue);
                 }
             } else {
-                if (!_.isEqual(value, oldValue)) {
+                // noinspection EqualityComparisonWithCoercionJS
+                if (
+                    !(value == oldValue && value == undefined) &&
+                    !_.isEqual(value, oldValue)
+                ) {
                     retval[key] = value;
                 }
             }
@@ -958,14 +1309,91 @@ function getOnlyChangedData(data, oldData) {
     return f(data, oldData);
 }
 
+function setOnViewModels(allViewModels, key, value) {
+    setOnViewModelsIf(allViewModels, key, value, undefined);
+}
+
+function setOnViewModelsIf(allViewModels, key, value, condition) {
+    if (!allViewModels) return;
+    _.each(allViewModels, function (viewModel) {
+        setOnViewModelIf(viewModel, key, value, condition);
+    });
+}
+
+function setOnViewModel(viewModel, key, value) {
+    setOnViewModelIf(viewModel, key, value, undefined);
+}
+
+function setOnViewModelIf(viewModel, key, value, condition) {
+    if (condition === undefined || !_.isFunction(condition)) {
+        condition = function () {
+            return true;
+        };
+    }
+
+    try {
+        if (!condition(viewModel)) {
+            return;
+        }
+
+        viewModel[key] = value;
+    } catch (exc) {
+        if (typeof Sentry !== "undefined") {
+            Sentry.captureException(exc);
+        }
+        log.error(
+            "Error while setting",
+            key,
+            "to",
+            value,
+            "on view model",
+            viewModel.constructor.name,
+            ":",
+            exc.stack || exc
+        );
+    }
+}
+
 function callViewModels(allViewModels, method, callback) {
     callViewModelsIf(allViewModels, method, undefined, callback);
 }
 
 function callViewModelsIf(allViewModels, method, condition, callback) {
-    if (condition == undefined || !_.isFunction(condition)) {
-        condition = function() { return true; };
+    if (!allViewModels) return;
+
+    _.each(allViewModels, function (viewModel) {
+        try {
+            callViewModelIf(viewModel, method, condition, callback);
+        } catch (exc) {
+            if (typeof Sentry !== "undefined") {
+                Sentry.captureException(exc);
+            }
+            log.error(
+                "Error calling",
+                method,
+                "on view model",
+                viewModel.constructor.name,
+                ":",
+                exc.stack || exc
+            );
+        }
+    });
+}
+
+function callViewModel(viewModel, method, callback, raiseErrors) {
+    callViewModelIf(viewModel, method, undefined, callback, raiseErrors);
+}
+
+function callViewModelIf(viewModel, method, condition, callback, raiseErrors) {
+    raiseErrors = raiseErrors === true || false;
+
+    if (condition === undefined || !_.isFunction(condition)) {
+        condition = function () {
+            return true;
+        };
     }
+
+    if (!_.isFunction(viewModel[method]) || !condition(viewModel, method)) return;
 
     var parameters = undefined;
     if (!_.isFunction(callback)) {
@@ -973,14 +1401,19 @@ function callViewModelsIf(allViewModels, method, condition, callback) {
         // call the view model method instead of providing it to the callback
         // - let's figure out how
 
-        if (callback == undefined) {
+        if (callback === undefined) {
             // directly call view model method with no parameters
             parameters = undefined;
-            log.trace("Calling method", method, "on view models");
+            log.trace("Calling method", method, "on view model");
         } else if (_.isArray(callback)) {
             // directly call view model method with these parameters
             parameters = callback;
-            log.trace("Calling method", method, "on view models with specified parameters", parameters);
+            log.trace(
+                "Calling method",
+                method,
+                "on view model with specified parameters",
+                parameters
+            );
         } else {
             // ok, this doesn't make sense, callback is neither undefined nor
             // an array, we'll return without doing anything
@@ -991,55 +1424,70 @@ function callViewModelsIf(allViewModels, method, condition, callback) {
         // the method directly
         callback = undefined;
     } else {
-        log.trace("Providing method", method, "on view models to specified callback", callback);
+        log.trace(
+            "Providing method",
+            method,
+            "on view model to specified callback",
+            callback
+        );
     }
 
-    _.each(allViewModels, function(viewModel) {
-        if (viewModel.hasOwnProperty(method) && condition(viewModel, method)) {
-            try {
-                if (callback == undefined) {
-                    if (parameters != undefined) {
-                        // call the method with the provided parameters
-                        viewModel[method].apply(viewModel, parameters);
-                    } else {
-                        // call the method without parameters
-                        viewModel[method]();
-                    }
-                } else {
-                    // provide the method to the callback
-                    callback(viewModel[method], viewModel);
-                }
-            } catch (exc) {
-                log.error("Error calling", method, "on view model", viewModel.constructor.name, ":", (exc.stack || exc));
+    try {
+        if (callback === undefined) {
+            if (parameters !== undefined) {
+                // call the method with the provided parameters
+                viewModel[method].apply(viewModel, parameters);
+            } else {
+                // call the method without parameters
+                viewModel[method]();
             }
+        } else {
+            // provide the method to the callback
+            callback(viewModel[method], viewModel);
         }
-    });
+    } catch (exc) {
+        if (typeof Sentry !== "undefined") {
+            Sentry.captureException(exc);
+        }
+        if (raiseErrors) {
+            throw exc;
+        } else {
+            log.error(
+                "Error calling",
+                method,
+                "on view model",
+                viewModel.constructor.name,
+                ":",
+                exc.stack || exc
+            );
+        }
+    }
 }
 
-var sizeObservable = function(observable) {
+var sizeObservable = function (observable) {
     return ko.computed({
-        read: function() {
+        read: function () {
             return formatSize(observable());
         },
-        write: function(value) {
+        write: function (value) {
             var result = bytesFromSize(value);
-            if (result != undefined) {
+            if (result !== undefined) {
                 observable(result);
             }
         }
-    })
+    });
 };
 
-var getQueryParameterByName = function(name, url) {
+var getQueryParameterByName = function (name, url) {
     // from http://stackoverflow.com/a/901144/2028598
     if (!url) {
-      url = window.location.href;
+        url = window.location.href;
     }
     name = name.replace(/[\[\]]/g, "\\$&");
     var regex = new RegExp("[?&]" + name + "(=([^&#]*)|&|#|$)"),
         results = regex.exec(url);
     if (!results) return null;
-    if (!results[2]) return '';
+    if (!results[2]) return "";
     return decodeURIComponent(results[2].replace(/\+/g, " "));
 };
 
@@ -1048,8 +1496,9 @@ var getQueryParameterByName = function(name, url) {
  *
  * E.g. turns a null byte in the string into "\x00".
  *
- * Only characters 0 to 31, 127 and 255 will be escaped, that
- * should leave printable characters and unicode alone.
+ * Characters 0 to 31 excluding 9, 10 and 13 will be escaped, as will
+ * 127, 128 to 159 and 255. That should leave printable characters and unicode
+ * alone.
  *
  * Originally based on
  * https://gist.github.com/mathiasbynens/1243213#gistcomment-53590
@@ -1057,15 +1506,20 @@ var getQueryParameterByName = function(name, url) {
  * @param str The string to escape
  * @returns {string}
  */
-var escapeUnprintableCharacters = function(str) {
+var escapeUnprintableCharacters = function (str) {
     var result = "";
     var index = 0;
     var charCode;
 
-    while (!isNaN(charCode = str.charCodeAt(index))) {
-        if (charCode < 32 || charCode == 127 || charCode == 255) {
+    while (!isNaN((charCode = str.charCodeAt(index)))) {
+        if (
+            (charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13) ||
+            charCode === 127 ||
+            (charCode >= 128 && charCode <= 159) ||
+            charCode === 255
+        ) {
             // special hex chars
-            result += "\\x" + (charCode > 15 ? "" : "0") + charCode.toString(16)
+            result += "\\x" + (charCode > 15 ? "" : "0") + charCode.toString(16);
         } else {
             // anything else
             result += str[index];
@@ -1074,4 +1528,91 @@ var escapeUnprintableCharacters = function(str) {
         index++;
     }
     return result;
+};
+
+var copyToClipboard = function (text) {
+    var temp = $("<textarea>");
+    $("body").append(temp);
+    temp.val(text).select();
+    document.execCommand("copy");
+    temp.remove();
+};
+
+var determineWebcamStreamType = function (streamUrl) {
+    if (streamUrl) {
+        var lastDotPosition = streamUrl.lastIndexOf(".");
+        var firstQuotationSignPosition = streamUrl.indexOf("?");
+        if (
+            lastDotPosition != -1 &&
+            firstQuotationSignPosition != -1 &&
+            lastDotPosition >= firstQuotationSignPosition
+        ) {
+            throw "Malformed URL. Cannot determine stream type.";
+        }
+
+        // If we have found a dot, try to extract the extension.
+        if (lastDotPosition > -1) {
+            if (firstQuotationSignPosition > -1) {
+                var extension = streamUrl.slice(
+                    lastDotPosition + 1,
+                    firstQuotationSignPosition - 1
+                );
+            } else {
+                var extension = streamUrl.slice(lastDotPosition + 1);
+            }
+            if (extension.toLowerCase() == "m3u8") {
+                return "hls";
+            }
+        }
+        // By default, 'mjpg' is the stream type.
+        return "mjpg";
+    } else {
+        throw "Empty streamUrl. Cannot determine stream type.";
+    }
+};
+
+var saveToLocalStorage = function (key, data) {
+    if (!Modernizr.localstorage) return;
+    localStorage[key] = JSON.stringify(data);
+};
+
+var loadFromLocalStorage = function (key) {
+    if (!Modernizr.localstorage) return {};
+
+    var currentString = localStorage[key];
+    var current;
+    if (currentString === undefined) {
+        current = {};
+    } else {
+        try {
+            current = JSON.parse(currentString);
+        } catch (ex) {
+            current = {};
+        }
+    }
+    return current;
+};
+
+var deepMerge = function (target, source) {
+    /**
+     * Implements an object deep merge, which contrary to _.merge doesn't try to
+     * merge arrays.
+     */
+    if (!_.isObject(target)) {
+        return target;
+    }
+
+    _.forOwn(source, function (value, key) {
+        if (
+            target.hasOwnProperty(key) &&
+            _.isPlainObject(target[key]) &&
+            _.isPlainObject(value)
+        ) {
+            target[key] = deepMerge(target[key], value);
+        } else {
+            target[key] = value;
+        }
+    });
+
+    return target;
 };
